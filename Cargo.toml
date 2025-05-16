@@ -1,0 +1,15 @@
+[package]
+name = "bre"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A Luau runtime."
+
+[dependencies]
+crossbeam = "0.8.4"
+libc = "0.2.172"
+rayon = "1.10.0"
+
+
+[build-dependencies]
+cmake = "0.1.54"
