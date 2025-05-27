@@ -1,4 +1,8 @@
-use std::{ffi::CStr, ptr::NonNull};
+use std::{
+    ffi::{CStr, CString},
+    path::Path,
+    ptr::NonNull,
+};
 
 pub mod ffi;
 
@@ -14,13 +18,20 @@ pub use main::Main;
 pub use stack::Stack;
 pub use thread::Thread;
 
+pub const REGISTRY_IDX: i32 = ffi::LUA_REGISTRYINDEX;
+
+struct LuauData<'executor> {
+    spawner: crate::runtime::Spawner<'executor>,
+    compiler: Compiler,
+}
+
 pub struct Luau<'executor> {
     state: NonNull<ffi::lua_State>,
-    spawner: *const crate::runtime::Spawner<'executor>,
+    data: *const LuauData<'executor>,
 }
 
 impl<'executor> Luau<'executor> {
-    pub fn new(spawner: crate::runtime::Spawner<'executor>) -> Self {
+    pub fn new(spawner: crate::runtime::Spawner<'executor>, compiler: Compiler) -> Self {
         #[allow(unused)]
         unsafe extern "C-unwind" fn lua_alloc(
             _ud: *mut std::ffi::c_void,
@@ -36,14 +47,14 @@ impl<'executor> Luau<'executor> {
             }
         }
 
-        let spawner = Box::into_raw(Box::new(spawner));
+        let data = Box::into_raw(Box::new(LuauData { spawner, compiler }));
         let state = NonNull::new(unsafe { ffi::lua_newstate(lua_alloc, std::ptr::null_mut()) })
             .expect("failed to create lua state");
 
-        let luau = Self { state, spawner };
+        let luau = Self { state, data };
 
         unsafe {
-            ffi::lua_setthreaddata(state.as_ptr(), spawner as _);
+            ffi::lua_setthreaddata(state.as_ptr(), data as _);
 
             ffi::luaopen_base(state.as_ptr());
             ffi::luaopen_coroutine(state.as_ptr());
@@ -57,7 +68,9 @@ impl<'executor> Luau<'executor> {
             ffi::luaopen_debug(state.as_ptr());
             ffi::luaopen_vector(state.as_ptr());
 
-            crate::task::open(&Main(state));
+            crate::global::require::open(&Main(state));
+
+            crate::global::task::open(&Main(state));
             ffi::lua_setfield(state.as_ptr(), ffi::LUA_GLOBALSINDEX, c"task".as_ptr());
 
             ffi::luaL_sandbox(state.as_ptr());
@@ -66,13 +79,15 @@ impl<'executor> Luau<'executor> {
         luau
     }
 
-    pub fn execute(&self, name: &'static CStr, bytecode: &Bytecode) {
+    pub fn execute(&self, path: &Path, bytecode: &Bytecode) {
         let main = Main(self.state);
 
         let (_, thread) = main.new_thread();
         let stack = thread.stack();
 
-        stack.push_bytecode(name, bytecode);
+        let name = CString::new(path.to_str().unwrap()).unwrap();
+
+        stack.push_bytecode(name.as_c_str(), bytecode);
         main.spawn(&thread, 0);
     }
 }
@@ -81,7 +96,7 @@ impl Drop for Luau<'_> {
     fn drop(&mut self) {
         unsafe {
             ffi::lua_close(self.state.as_ptr());
-            drop(Box::from_raw(self.spawner as *mut crate::runtime::Spawner));
+            drop(Box::from_raw(self.data as *mut LuauData));
         }
     }
 }

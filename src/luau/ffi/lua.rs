@@ -2,7 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::ffi::{c_char, c_double, c_float, c_int, c_void};
+use std::ffi::{c_char, c_double, c_float, c_int, c_uchar, c_void};
 use std::marker::{PhantomData, PhantomPinned};
 
 pub const LUA_MULTRET: c_int = -1;
@@ -84,11 +84,35 @@ pub enum lua_Type {
 
 pub use lua_Type::*;
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct lua_Debug {
+    pub name: *const c_char,
+    pub what: *const c_char,
+    pub source: *const c_char,
+    pub short_src: *const c_char,
+    pub linedefined: c_int,
+    pub currentline: c_int,
+    pub nupvals: c_uchar,
+    pub nparams: c_uchar,
+    pub isvararg: c_char,
+    pub userdata: *mut c_void,
+
+    pub ssbuf: [c_char; 256],
+}
+
 unsafe extern "C-unwind" {
     pub fn lua_newstate(f: lua_Alloc, ud: *mut c_void) -> *mut lua_State;
     pub fn lua_close(L: *mut lua_State);
     pub fn lua_newthread(L: *mut lua_State) -> *mut lua_State;
     pub fn lua_mainthread(L: *mut lua_State) -> *mut lua_State;
+
+    pub fn lua_getinfo(
+        L: *mut lua_State,
+        level: c_int,
+        what: *const c_char,
+        ar: *mut lua_Debug,
+    ) -> c_int;
 
     pub fn luau_load(
         L: *mut lua_State,
@@ -97,6 +121,13 @@ unsafe extern "C-unwind" {
         size: usize,
         env: c_int,
     ) -> c_int;
+
+    pub fn lua_pcall(
+        L: *mut lua_State,
+        nargs: c_int,
+        nresults: c_int,
+        errfunc: c_int,
+    ) -> lua_Status;
 
     pub fn lua_error(L: *mut lua_State) -> !;
 
@@ -123,7 +154,7 @@ unsafe extern "C-unwind" {
     pub fn lua_pushvalue(L: *mut lua_State, idx: c_int);
     pub fn lua_pushnil(L: *mut lua_State);
     pub fn lua_pushboolean(L: *mut lua_State, b: c_int);
-    pub fn lua_pushlightuserdata(L: *mut lua_State, p: *mut c_void);
+    pub fn lua_pushlightuserdatatagged(L: *mut lua_State, p: *mut c_void, tag: c_int);
     pub fn lua_pushnumber(L: *mut lua_State, n: c_double);
     pub fn lua_pushvector(L: *mut lua_State, x: c_float, y: c_float, z: c_float);
     pub fn lua_pushlstring(L: *mut lua_State, s: *const c_char, l: usize);
@@ -144,6 +175,8 @@ unsafe extern "C-unwind" {
     pub fn lua_setmetatable(L: *mut lua_State, objindex: c_int) -> c_int;
     pub fn lua_getreadonly(L: *mut lua_State, idx: c_int) -> c_int;
     pub fn lua_setreadonly(L: *mut lua_State, idx: c_int, enabled: c_int);
+
+    pub fn lua_objlen(L: *mut lua_State, idx: c_int) -> usize;
 
     pub fn lua_newbuffer(L: *mut lua_State, size: usize) -> *mut c_void;
 

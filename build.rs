@@ -12,6 +12,9 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
     println!("cargo:rustc-link-lib=static=Luau.VM");
+    println!("cargo:rustc-link-lib=static=Luau.Require");
+    println!("cargo:rustc-link-lib=static=Luau.RequireNavigator");
+    println!("cargo:rustc-link-lib=static=Luau.Config");
     println!("cargo:rustc-link-lib=static=Luau.Compiler");
     println!("cargo:rustc-link-lib=static=Luau.Ast");
     println!("cargo:rustc-link-lib=stdc++");

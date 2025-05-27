@@ -1,15 +1,19 @@
 mod luau;
 mod runtime;
 
-mod task;
+mod global;
+
+mod cli;
 
 fn main() {
-    let compiler = luau::Compiler::default();
-    let bytecode = compiler.compile(std::fs::read_to_string("main.luau").unwrap().as_str());
+    cli::cli();
 
-    let executor = runtime::Executor::default();
-    let luau = luau::Luau::new(executor.spawner());
+    // let compiler = luau::Compiler::default();
+    // let bytecode = compiler.compile(std::fs::read_to_string("main.luau").unwrap().as_str());
 
-    luau.execute(c"main", &bytecode);
-    executor.run();
+    // let executor = runtime::Executor::default();
+    // let luau = luau::Luau::new(executor.spawner());
+
+    // luau.execute(c"main", &bytecode);
+    // executor.run();
 }

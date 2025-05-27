@@ -1,4 +1,4 @@
-use std::ptr::NonNull;
+use std::{ffi::CString, path::PathBuf, ptr::NonNull};
 
 use super::*;
 
@@ -13,12 +13,16 @@ impl Main {
         self.0.as_ptr()
     }
 
-    pub fn spawner<'executor>(&self) -> crate::runtime::Spawner<'executor> {
-        unsafe {
-            let ptr = ffi::lua_getthreaddata(self.as_ptr()) as *const crate::runtime::Spawner;
+    fn data<'executor>(&self) -> &LuauData<'executor> {
+        unsafe { &*(ffi::lua_getthreaddata(self.as_ptr()) as *const LuauData<'executor>) }
+    }
 
-            (*ptr).clone()
-        }
+    pub fn spawner<'executor>(&self) -> crate::runtime::Spawner<'executor> {
+        self.data().spawner.clone()
+    }
+
+    pub fn compiler(&self) -> Compiler {
+        self.data().compiler.clone()
     }
 
     pub fn stack(&self) -> Stack {
@@ -39,7 +43,7 @@ impl Main {
         }
     }
 
-    fn handle_status(&self, thread: &Thread, status: Status) {
+    pub fn handle_status(&self, thread: &Thread, status: Status) {
         match status {
             Status::Ok => {}
             Status::Yield => {}
@@ -63,5 +67,17 @@ impl Main {
 
     pub fn spawn_error(&self, thread: &Thread) {
         self.handle_status(thread, thread.resume_error(None));
+    }
+
+    pub fn execute(&self, path: PathBuf, bytecode: &Bytecode) -> (Status, Stack) {
+        let (_, thread) = self.new_thread();
+        let stack = thread.stack();
+
+        stack.push_bytecode(
+            &unsafe { CString::from_vec_unchecked(path.display().to_string().into_bytes()) },
+            bytecode,
+        );
+
+        (thread.resume(None, 0), stack)
     }
 }

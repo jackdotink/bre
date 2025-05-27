@@ -6,9 +6,12 @@ license = "MIT"
 description = "A Luau runtime."
 
 [dependencies]
+clap = { version = "4.5.38", features = ["derive"] }
 crossbeam = "0.8.4"
 libc = "0.2.172"
 rayon = "1.10.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
 
 
 [build-dependencies]

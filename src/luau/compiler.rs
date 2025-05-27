@@ -13,6 +13,19 @@ pub enum OptLevel {
     Full,
 }
 
+impl TryFrom<u8> for OptLevel {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(OptLevel::None),
+            1 => Ok(OptLevel::Some),
+            2 => Ok(OptLevel::Full),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum DebugLevel {
@@ -24,7 +37,20 @@ pub enum DebugLevel {
     Full,
 }
 
-#[derive(Default)]
+impl TryFrom<u8> for DebugLevel {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(DebugLevel::None),
+            1 => Ok(DebugLevel::Some),
+            2 => Ok(DebugLevel::Full),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct Compiler {
     opt_level: OptLevel,
     dbg_level: DebugLevel,
@@ -41,7 +67,7 @@ impl Compiler {
         self
     }
 
-    pub fn compile(&self, source: &str) -> Bytecode {
+    pub fn compile(&self, source: &[u8]) -> Bytecode {
         use std::ptr::null;
 
         let mut options = ffi::lua_CompileOptions {

@@ -1,0 +1,45 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug executable 'bre'",
+			"cargo": {
+				"args": [
+					"build",
+					"--bin=bre",
+					"--package=bre"
+				],
+				"filter": {
+					"name": "bre",
+					"kind": "bin"
+				}
+			},
+			"args": ["run"],
+			"cwd": "${workspaceFolder}"
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug unit tests in executable 'bre'",
+			"cargo": {
+				"args": [
+					"test",
+					"--no-run",
+					"--bin=bre",
+					"--package=bre"
+				],
+				"filter": {
+					"name": "bre",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}"
+		}
+	]
+}

@@ -43,6 +43,10 @@ impl Executor {
     }
 
     pub fn run(&self) {
+        if self.pending.get() == 0 {
+            return;
+        }
+
         while let Ok(task) = self.queue.recv() {
             if unsafe { task.poll() }.is_ready() {
                 self.pending.set(self.pending.get() - 1);

@@ -1,5 +1,5 @@
 use std::{
-    ffi::{CStr, c_void},
+    ffi::{CStr, c_int, c_void},
     ptr::NonNull,
 };
 
@@ -28,9 +28,24 @@ impl Stack {
         Thread(self.0)
     }
 
-    pub fn error(&self, msg: impl AsRef<[u8]>) -> ! {
-        self.push_string(msg);
+    pub fn pcall(&self, nargs: u32, nresults: u32, errfunc: i32) -> Status {
+        unsafe {
+            Status::from(ffi::lua_pcall(
+                self.as_ptr(),
+                nargs as _,
+                nresults as _,
+                errfunc as _,
+            ))
+        }
+    }
+
+    pub fn error(&self) -> ! {
         unsafe { ffi::lua_error(self.as_ptr()) }
+    }
+
+    pub fn push_error(&self, msg: impl AsRef<[u8]>) -> ! {
+        self.push_string(msg);
+        self.error();
     }
 
     pub fn get_top(&self) -> u32 {
@@ -49,8 +64,8 @@ impl Stack {
         unsafe { ffi::lua_xmove(self.as_ptr(), to.as_ptr(), n as _) };
     }
 
-    pub fn xpush(&self, to: &Thread, n: u32) {
-        unsafe { ffi::lua_xpush(self.as_ptr(), to.as_ptr(), n as _) };
+    pub fn xpush(&self, to: &Thread, idx: i32) {
+        unsafe { ffi::lua_xpush(self.as_ptr(), to.as_ptr(), idx as _) };
     }
 
     pub fn remove(&self, idx: i32) {
@@ -83,7 +98,7 @@ impl Stack {
     }
 
     pub fn push_light_userdata(&self, p: *mut c_void) {
-        unsafe { ffi::lua_pushlightuserdata(self.as_ptr(), p) };
+        unsafe { ffi::lua_pushlightuserdatatagged(self.as_ptr(), p, 0) };
     }
 
     pub fn push_number(&self, n: f64) {
@@ -119,6 +134,27 @@ impl Stack {
             >(func);
 
             ffi::lua_pushcclosurek(self.as_ptr(), func, name.as_ptr() as _, 0, None);
+        }
+    }
+
+    pub fn push_function_cont(
+        &self,
+        name: &'static CStr,
+        func: extern "C-unwind" fn(ctx: Context) -> FnReturn,
+        cont: extern "C-unwind" fn(ctx: Context, status: Status) -> FnReturn,
+    ) {
+        unsafe {
+            let func = std::mem::transmute::<
+                extern "C-unwind" fn(ctx: Context) -> FnReturn,
+                extern "C-unwind" fn(*mut ffi::lua_State) -> FnReturn,
+            >(func);
+
+            let cont = std::mem::transmute::<
+                extern "C-unwind" fn(ctx: Context, status: Status) -> FnReturn,
+                extern "C-unwind" fn(*mut ffi::lua_State, status: c_int) -> FnReturn,
+            >(cont);
+
+            ffi::lua_pushcclosurek(self.as_ptr(), func, name.as_ptr() as _, 0, Some(cont));
         }
     }
 
@@ -299,7 +335,7 @@ impl Stack {
         if let Some(b) = self.to_boolean(idx as _) {
             b
         } else {
-            self.error(format!(
+            self.push_error(format!(
                 "bad argument #{idx} to function (boolean expected, got {})",
                 self.type_of(idx as _)
             ))
@@ -313,7 +349,7 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
+                ty => self.push_error(format!(
                     "bad argument #{idx} to function (boolean or nil expected, got {})",
                     ty
                 )),
@@ -325,7 +361,7 @@ impl Stack {
         if let Some(n) = self.to_number(idx as _) {
             n
         } else {
-            self.error(format!(
+            self.push_error(format!(
                 "bad argument #{idx} to function (number expected, got {})",
                 self.type_of(idx as _)
             ))
@@ -339,7 +375,7 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
+                ty => self.push_error(format!(
                     "bad argument #{idx} to function (number or nil expected, got {})",
                     ty
                 )),
@@ -351,7 +387,7 @@ impl Stack {
         if let Some(v) = self.to_vector(idx as _) {
             v
         } else {
-            self.error(format!(
+            self.push_error(format!(
                 "bad argument #{idx} to function (vector expected, got {})",
                 self.type_of(idx as _)
             ))
@@ -365,7 +401,7 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
+                ty => self.push_error(format!(
                     "bad argument #{idx} to function (vector or nil expected, got {})",
                     ty
                 )),
@@ -377,7 +413,7 @@ impl Stack {
         if let Some(s) = self.to_string_slice(idx as _) {
             s
         } else {
-            self.error(format!(
+            self.push_error(format!(
                 "bad argument #{idx} to function (string expected, got {})",
                 self.type_of(idx as _)
             ))
@@ -388,8 +424,8 @@ impl Stack {
         if let Some(s) = self.to_string_str(idx as _) {
             s
         } else {
-            self.error(format!(
-                "bad argument #{idx} to function (string expected, got {})",
+            self.push_error(format!(
+                "bad argument #{idx} to function (utf8 string expected, got {})",
                 self.type_of(idx as _)
             ))
         }
@@ -402,7 +438,7 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
+                ty => self.push_error(format!(
                     "bad argument #{idx} to function (string or nil expected, got {})",
                     ty
                 )),
@@ -417,8 +453,8 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
-                    "bad argument #{idx} to function (string or nil expected, got {})",
+                ty => self.push_error(format!(
+                    "bad argument #{idx} to function (utf8 string or nil expected, got {})",
                     ty
                 )),
             }
@@ -429,7 +465,7 @@ impl Stack {
         match self.type_of(idx as _) {
             Type::Table => (),
 
-            ty => self.error(format!(
+            ty => self.push_error(format!(
                 "bad argument #{idx} to function (table expected, got {})",
                 ty
             )),
@@ -441,7 +477,7 @@ impl Stack {
             Type::Table => Some(()),
             Type::None | Type::Nil => None,
 
-            ty => self.error(format!(
+            ty => self.push_error(format!(
                 "bad argument #{idx} to function (table or nil expected, got {})",
                 ty
             )),
@@ -452,7 +488,7 @@ impl Stack {
         match self.type_of(idx as _) {
             Type::Thread => self.to_thread(idx as _).unwrap(),
 
-            ty => self.error(format!(
+            ty => self.push_error(format!(
                 "bad argument #{idx} to function (thread expected, got {})",
                 ty
             )),
@@ -465,7 +501,7 @@ impl Stack {
 
             Type::None | Type::Nil => None,
 
-            ty => self.error(format!(
+            ty => self.push_error(format!(
                 "bad argument #{idx} to function (thread or nil expected, got {})",
                 ty
             )),
@@ -476,7 +512,7 @@ impl Stack {
         if let Some(b) = self.to_buffer(idx as _) {
             b
         } else {
-            self.error(format!(
+            self.push_error(format!(
                 "bad argument #{idx} to function (buffer expected, got {})",
                 self.type_of(idx as _)
             ))
@@ -490,7 +526,7 @@ impl Stack {
             match self.type_of(idx as _) {
                 Type::None | Type::Nil => None,
 
-                ty => self.error(format!(
+                ty => self.push_error(format!(
                     "bad argument #{idx} to function (buffer or nil expected, got {})",
                     ty
                 )),
@@ -536,5 +572,9 @@ impl Stack {
 
     pub fn table_set_raw_field(&self, tbl_idx: i32, key: &CStr) {
         unsafe { ffi::lua_rawsetfield(self.as_ptr(), tbl_idx as _, key.as_ptr() as _) };
+    }
+
+    pub fn len(&self, idx: i32) -> usize {
+        unsafe { ffi::lua_objlen(self.as_ptr(), idx as _) }
     }
 }

@@ -15,7 +15,7 @@ pub fn open(main: &luau::Main) {
                 thread
             }
 
-            _ => ctx.error("bad argument #1 to function (thread or function expected)"),
+            _ => ctx.push_error("bad argument #1 to function (thread or function expected)"),
         };
 
         let nargs = ctx.get_top() - 1;
@@ -38,7 +38,7 @@ pub fn open(main: &luau::Main) {
                 thread
             }
 
-            _ => ctx.error("bad argument #1 to function (thread or function expected)"),
+            _ => ctx.push_error("bad argument #1 to function (thread or function expected)"),
         };
 
         let r = ctx.to_ref(1);
@@ -67,7 +67,7 @@ pub fn open(main: &luau::Main) {
                 thread
             }
 
-            _ => ctx.error("bad argument #1 to function (thread or function expected)"),
+            _ => ctx.push_error("bad argument #1 to function (thread or function expected)"),
         };
 
         let r = ctx.to_ref(1);
