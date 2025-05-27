@@ -6,6 +6,29 @@ use std::{
 
 use crate::luau;
 
+fn ptr_to_str(stack: &luau::Stack, ptr: *const c_char) -> &str {
+    unsafe {
+        CStr::from_ptr(ptr)
+            .to_str()
+            .unwrap_or_else(|_| stack.push_error("non-utf8 string"))
+    }
+}
+
+enum Reason {
+    NotFound,
+    Ambiguous,
+}
+
+impl From<Result<(), Reason>> for luau::ffi::luarequire_NavigateResult {
+    fn from(value: Result<(), Reason>) -> Self {
+        match value {
+            Ok(()) => luau::ffi::luarequire_NavigateResult::NAVIGATE_SUCCESS,
+            Err(Reason::NotFound) => luau::ffi::luarequire_NavigateResult::NAVIGATE_NOT_FOUND,
+            Err(Reason::Ambiguous) => luau::ffi::luarequire_NavigateResult::NAVIGATE_AMBIGUOUS,
+        }
+    }
+}
+
 #[repr(transparent)]
 struct Current(*mut c_void);
 
@@ -22,26 +45,110 @@ impl Current {
     pub fn as_pathbuf(&self) -> &mut PathBuf {
         unsafe { self.as_ptr().as_mut().unwrap_unchecked() }
     }
-}
 
-fn is_ambiguous(current: Current) -> bool {
-    let path = current.as_path();
+    pub fn as_str(&self) -> &str {
+        self.as_path().to_str().expect("path is not valid utf8")
+    }
 
-    path.is_dir() && path.with_extension("luau").is_file()
-}
+    pub fn possible_paths(&self) -> (PathBuf, PathBuf) {
+        (
+            self.as_path().with_extension("luau"),
+            self.as_path().join("init.luau"),
+        )
+    }
 
-fn cptr_to_str(ctx: &luau::Context, ptr: *const c_char) -> &str {
-    unsafe {
-        CStr::from_ptr(ptr)
-            .to_str()
-            .unwrap_or_else(|_| ctx.push_error("non-utf8 string"))
+    pub fn exists(&self) -> bool {
+        let (first, second) = self.possible_paths();
+
+        first.is_file() || second.is_file()
+    }
+
+    pub fn is_ambiguous(&self) -> bool {
+        let (first, second) = self.possible_paths();
+
+        first.is_file() && second.is_file()
+    }
+
+    pub fn jump(&self, path: &str) -> Result<(), Reason> {
+        match Path::new(path).canonicalize() {
+            Err(_) => Err(Reason::NotFound),
+            Ok(path) => {
+                self.as_pathbuf().clear();
+                self.as_pathbuf().push(path);
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn reset(&self, chunkname: &str) {
+        let chunkname = chunkname.strip_suffix(".luau").unwrap();
+        let chunkname = chunkname.strip_suffix("/init").unwrap_or(chunkname);
+
+        self.as_pathbuf().clear();
+        self.as_pathbuf().push(chunkname);
+    }
+
+    pub fn parent(&self) -> Result<(), Reason> {
+        if !self.as_pathbuf().pop() {
+            Err(Reason::NotFound)
+        } else if self.is_ambiguous() {
+            Err(Reason::Ambiguous)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn child(&self, name: &str) -> Result<(), Reason> {
+        self.as_pathbuf().push(name);
+
+        if !self.exists() {
+            Err(Reason::NotFound)
+        } else if self.is_ambiguous() {
+            Err(Reason::Ambiguous)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.as_path().join(".luaurc")
+    }
+
+    pub fn config_exists(&self) -> bool {
+        self.config_path().is_file()
     }
 }
 
-fn path_to_str<'path>(ctx: &luau::Context, path: &'path Path) -> &'path str {
-    path.as_os_str()
-        .to_str()
-        .unwrap_or_else(|| ctx.push_error("non-utf8 path"))
+struct Writer {
+    buffer: *mut c_char,
+    buffer_size: usize,
+    size_out: *mut usize,
+}
+
+impl Writer {
+    pub fn new(buffer: *mut c_char, buffer_size: usize, size_out: *mut usize) -> Self {
+        Self {
+            buffer,
+            buffer_size,
+            size_out,
+        }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    fn as_slice(&self, size: usize) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.buffer as *mut u8, size) }
+    }
+
+    pub fn set_size(&self, size: usize) -> Result<&mut [u8], ()> {
+        unsafe { self.size_out.write(size) };
+
+        if self.buffer_size < size {
+            Err(())
+        } else {
+            Ok(self.as_slice(size))
+        }
+    }
 }
 
 extern "C-unwind" fn is_require_allowed(_: luau::Context, _: Current, _: *const c_char) -> bool {
@@ -53,11 +160,7 @@ extern "C-unwind" fn reset(
     current: Current,
     chunkname: *const c_char,
 ) -> luau::ffi::luarequire_NavigateResult {
-    let chunkname = cptr_to_str(&ctx, chunkname);
-    let chunkname = chunkname.strip_suffix(".luau").unwrap();
-    let chunkname = chunkname.strip_suffix("/init").unwrap_or(chunkname);
-
-    current.as_pathbuf().push(chunkname);
+    current.reset(ptr_to_str(&ctx, chunkname));
 
     luau::ffi::luarequire_NavigateResult::NAVIGATE_SUCCESS
 }
@@ -67,31 +170,14 @@ extern "C-unwind" fn jump_to_alias(
     current: Current,
     path: *const c_char,
 ) -> luau::ffi::luarequire_NavigateResult {
-    let path = Path::new(cptr_to_str(&ctx, path));
-
-    match path.canonicalize() {
-        Ok(path) => current.as_pathbuf().push(path),
-        Err(_) => return luau::ffi::luarequire_NavigateResult::NAVIGATE_NOT_FOUND,
-    }
-
-    if is_ambiguous(current) {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_AMBIGUOUS
-    } else {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_SUCCESS
-    }
+    current.jump(ptr_to_str(&ctx, path)).into()
 }
 
 extern "C-unwind" fn to_parent(
     _: luau::Context,
     current: Current,
 ) -> luau::ffi::luarequire_NavigateResult {
-    if !current.as_pathbuf().pop() {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_NOT_FOUND
-    } else if is_ambiguous(current) {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_AMBIGUOUS
-    } else {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_SUCCESS
-    }
+    current.parent().into()
 }
 
 extern "C-unwind" fn to_child(
@@ -99,51 +185,37 @@ extern "C-unwind" fn to_child(
     current: Current,
     name: *const c_char,
 ) -> luau::ffi::luarequire_NavigateResult {
-    let name = Path::new(cptr_to_str(&ctx, name));
-    current.as_pathbuf().push(name);
-
-    if !(current.as_path().is_dir() || current.as_path().with_extension("luau").is_file()) {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_NOT_FOUND
-    } else if is_ambiguous(current) {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_AMBIGUOUS
-    } else {
-        luau::ffi::luarequire_NavigateResult::NAVIGATE_SUCCESS
-    }
+    current.child(ptr_to_str(&ctx, name)).into()
 }
 
 extern "C-unwind" fn is_module_present(_: luau::Context, current: Current) -> bool {
-    let path = current.as_path();
-
-    path.with_extension("luau").is_file() || path.join("./init.luau").is_file()
+    current.exists()
 }
 
 extern "C-unwind" fn get_chunkname(
-    ctx: luau::Context,
+    _: luau::Context,
     current: Current,
     buffer: *mut c_char,
     buffer_size: usize,
     size_out: *mut usize,
 ) -> luau::ffi::luarequire_WriteResult {
-    let path = path_to_str(&ctx, current.as_path());
-    let len = path.len();
+    let writer = Writer::new(buffer, buffer_size, size_out);
+    let path = current.as_str().as_bytes();
 
-    unsafe { size_out.write(len) };
-    if buffer_size < len {
-        luau::ffi::luarequire_WriteResult::WRITE_BUFFER_TOO_SMALL
-    } else {
-        let buffer = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, len) };
-        buffer.copy_from_slice(path.as_bytes());
+    let Ok(slice) = writer.set_size(path.len()) else {
+        return luau::ffi::luarequire_WriteResult::WRITE_BUFFER_TOO_SMALL;
+    };
 
-        luau::ffi::luarequire_WriteResult::WRITE_SUCCESS
-    }
+    slice.copy_from_slice(path);
+    luau::ffi::luarequire_WriteResult::WRITE_SUCCESS
 }
 
 extern "C-unwind" fn get_loadname(
-    ctx: &luau::Context,
-    current: Current,
-    buffer: *mut c_char,
-    buffer_size: usize,
-    size_out: *mut usize,
+    _: luau::Context,
+    _: Current,
+    _: *mut c_char,
+    _: usize,
+    _: *mut usize,
 ) -> luau::ffi::luarequire_WriteResult {
     luau::ffi::luarequire_WriteResult::WRITE_SUCCESS
 }
@@ -158,18 +230,20 @@ extern "C-unwind" fn get_cache_key(
     get_chunkname(ctx, current, buffer, buffer_size, size_out)
 }
 
-extern "C-unwind" fn is_config_present(ctx: &luau::Context, current: Current) -> bool {
-    current.as_path().join(".luaurc").is_file()
+extern "C-unwind" fn is_config_present(_: &luau::Context, current: Current) -> bool {
+    current.config_exists()
 }
 
 extern "C-unwind" fn get_config(
-    ctx: &luau::Context,
+    _: luau::Context,
     current: Current,
     buffer: *mut c_char,
     buffer_size: usize,
     size_out: *mut usize,
 ) -> luau::ffi::luarequire_WriteResult {
-    let path = current.as_path().join(".luaurc");
+    let writer = Writer::new(buffer, buffer_size, size_out);
+    let path = current.config_path();
+
     let Ok(mut file) = std::fs::File::open(path) else {
         return luau::ffi::luarequire_WriteResult::WRITE_FAILURE;
     };
@@ -178,17 +252,15 @@ extern "C-unwind" fn get_config(
         return luau::ffi::luarequire_WriteResult::WRITE_FAILURE;
     };
 
-    unsafe { size_out.write(len) };
-    if buffer_size < len {
-        luau::ffi::luarequire_WriteResult::WRITE_BUFFER_TOO_SMALL
-    } else {
-        let buffer = unsafe { std::slice::from_raw_parts_mut(buffer as *mut u8, len) };
-        let Ok(_) = file.read_exact(buffer) else {
-            return luau::ffi::luarequire_WriteResult::WRITE_FAILURE;
-        };
+    let Ok(slice) = writer.set_size(len) else {
+        return luau::ffi::luarequire_WriteResult::WRITE_BUFFER_TOO_SMALL;
+    };
 
-        luau::ffi::luarequire_WriteResult::WRITE_SUCCESS
-    }
+    let Ok(_) = file.read_exact(slice) else {
+        return luau::ffi::luarequire_WriteResult::WRITE_FAILURE;
+    };
+
+    luau::ffi::luarequire_WriteResult::WRITE_SUCCESS
 }
 
 fn push_yield_key(stack: &luau::Stack) {
@@ -204,11 +276,11 @@ fn push_yield_table(stack: &luau::Stack) {
 extern "C-unwind" fn runner(ctx: luau::Context) -> luau::FnReturn {
     // chunkname, userfunc
 
-    push_yield_table(&ctx);
-    ctx.push_copy(-3);
-    ctx.push_table();
-    ctx.table_set_raw(-3);
-    ctx.pop(1);
+    push_yield_table(&ctx); // chunkname, userfunc, reqtbl
+    ctx.push_copy(1); // chunkname, userfunc, reqtbl, chunkname
+    ctx.push_table(); // chunkname, userfunc, reqtbl, chunkname, yldtbl
+    ctx.table_set_raw(3); // chunkname, userfunc, reqtbl
+    ctx.pop(1); // chunkname, userfunc
 
     // chunkname, userfunc
 
@@ -219,20 +291,12 @@ extern "C-unwind" fn runner(ctx: luau::Context) -> luau::FnReturn {
         ctx.ret_with(1)
     }
 
-    ctx.push_copy(-1);
-    // chunkname, userfunc, userfunc
+    ctx.push_copy(2); // chunkname, userfunc, userfunc
+    ctx.push_function(c"require_error_handler", handle_error); // chunkname, userfunc, userfunc, errfunc
+    ctx.replace(2); // chunkname, errfunc, userfunc
 
-    ctx.push_function(c"require_error_handler", handle_error);
-    // chunkname, userfunc, userfunc, errfunc
-
-    ctx.replace(-3);
-    // chunkname, errfunc, userfunc
-
-    let success = ctx.pcall(0, 1, -2);
-    // chunkname, errfunc, result
-
-    ctx.remove(-2);
-    // chunkname, result
+    let success = ctx.pcall(0, 1, 2); // chunkname, errfunc, result
+    ctx.remove(-2); // chunkname, result
 
     if ctx.thread().status() == luau::Status::Yield {
         -1 // special yield indicator
@@ -246,23 +310,17 @@ extern "C-unwind" fn runner_cont(ctx: luau::Context, status: luau::Status) -> lu
 
     let main = ctx.main();
 
-    push_yield_table(&ctx);
-    ctx.push_copy(-2);
-    ctx.table_get_raw(-2);
-
-    // chunkname, result, reqyld, yldtbl
+    push_yield_table(&ctx); // chunkname, result, reqtbl
+    ctx.push_copy(1); // chunkname, result, reqtbl, chunkname
+    ctx.table_get_raw(3); // chunkname, result, reqtbl, yldtbl
 
     for i in 1..ctx.len(-1) {
-        ctx.table_get_raw_i(-1, i as u32);
-        // chunkname, result, reqyld, yldtbl, thread
-
+        ctx.table_get_raw_i(-1, i as u32); // chunkname, result, reqyld, yldtbl, thread
         let thread = ctx.to_thread(-1).unwrap();
-
-        ctx.pop(1);
-        // chunkname, result, reqyld, yldtbl
+        ctx.pop(1); // chunkname, result, reqyld, yldtbl
 
         if status == luau::Status::Ok {
-            ctx.xpush(&thread, -3);
+            ctx.xpush(&thread, 2);
             main.spawn(&thread, 1);
         } else {
             thread
@@ -272,14 +330,13 @@ extern "C-unwind" fn runner_cont(ctx: luau::Context, status: luau::Status) -> lu
         }
     }
 
-    // chunkname, result, reqyld, yldtbl
-    ctx.pop(1);
+    ctx.pop(1); // chunkname, result, reqyld
 
-    ctx.push_copy(-3);
-    ctx.push_nil();
-    ctx.table_set_raw(-3);
+    ctx.push_copy(1); // chunkname, result, reqyld, chunkname
+    ctx.push_nil(); // chunkname, result, reqyld, chunkname, nil
+    ctx.table_set_raw(3); // chunkname, result, reqyld
 
-    ctx.pop(1);
+    ctx.pop(1); // chunkname, result
 
     if status == luau::Status::Ok {
         ctx.ret_with(1)
@@ -292,29 +349,45 @@ extern "C-unwind" fn load(
     ctx: luau::Context,
     current: Current,
     _: *const c_char,
-    chunkname_ptr: *const c_char,
+    chunkname: *const c_char,
     _: *const c_char,
 ) -> c_int {
-    let Ok(source) = std::fs::read(current.as_path().with_extension("luau")) else {
-        ctx.push_error(format!(
-            "failed to read file '{}'",
-            current.as_path().display()
-        ));
+    let chunkname = unsafe { CStr::from_ptr(chunkname) };
+
+    push_yield_table(&ctx); // reqtbl
+    ctx.push_string(chunkname.to_bytes()); // reqtbl, chunkname
+    ctx.table_get_raw(-2); // reqtbl, yldtbl
+
+    if !ctx.is_nil(-1) {
+        ctx.push_thread(&ctx.thread()); // reqtbl, yldtbl, thread
+        ctx.table_set_raw_i(-2, ctx.len(-2) as u32 + 1); // reqtbl, yldtbl
+
+        return -1; // special yield indicator
+    }
+
+    ctx.pop(2); // stack is empty
+
+    let source = {
+        let (first, second) = current.possible_paths();
+
+        if first.exists() {
+            std::fs::read(&first).unwrap_or_else(|_| {
+                ctx.push_error(format!("failed to read file '{}'", first.display()))
+            })
+        } else {
+            std::fs::read(&second).unwrap_or_else(|_| {
+                ctx.push_error(format!("failed to read file '{}'", second.display()))
+            })
+        }
     };
 
-    let chunkname = cptr_to_str(&ctx, chunkname_ptr);
-
     let main = ctx.main();
-
     let (_, thread) = main.new_thread();
     let stack = thread.stack();
 
     stack.push_function_cont(c"require_runner", runner, runner_cont);
-    stack.push_string(chunkname);
-    stack.push_bytecode(
-        unsafe { CStr::from_ptr(chunkname_ptr) },
-        &main.compiler().compile(&source),
-    );
+    stack.push_string(chunkname.to_bytes());
+    stack.push_bytecode(chunkname, &main.compiler().compile(&source));
 
     match thread.resume(None, 2) {
         luau::Status::Ok => {
@@ -324,12 +397,11 @@ extern "C-unwind" fn load(
         }
 
         luau::Status::Yield => {
-            push_yield_table(&ctx);
-            ctx.push_string(chunkname);
-            ctx.table_get_raw(-2);
-
-            ctx.push_thread(&ctx.thread());
-            ctx.table_set_raw_i(-2, ctx.len(-2) as u32 + 1);
+            push_yield_table(&ctx); // reqtbl
+            ctx.push_string(chunkname.to_bytes()); // reqtbl, chunkname
+            ctx.table_get_raw(-2); // reqtbl, yldtbl
+            ctx.push_thread(&ctx.thread()); // reqtbl, yldtbl, thread
+            ctx.table_set_raw_i(-2, ctx.len(-2) as u32 + 1); // reqtbl, yldtbl
 
             -1
         }
