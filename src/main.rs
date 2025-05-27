@@ -1,7 +1,7 @@
 mod luau;
 mod runtime;
 
-mod global;
+mod globals;
 
 mod cli;
 

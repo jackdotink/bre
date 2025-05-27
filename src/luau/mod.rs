@@ -68,9 +68,9 @@ impl<'executor> Luau<'executor> {
             ffi::luaopen_debug(state.as_ptr());
             ffi::luaopen_vector(state.as_ptr());
 
-            crate::global::require::open(&Main(state));
+            crate::globals::require::open(&Main(state));
 
-            crate::global::task::open(&Main(state));
+            crate::globals::task::open(&Main(state));
             ffi::lua_setfield(state.as_ptr(), ffi::LUA_GLOBALSINDEX, c"task".as_ptr());
 
             ffi::luaL_sandbox(state.as_ptr());
