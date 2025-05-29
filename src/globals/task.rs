@@ -46,11 +46,14 @@ pub fn open(main: &luau::Main) {
         let nargs = ctx.get_top() - 1;
         ctx.xmove(&thread, nargs);
 
-        let main = ctx.main();
-        ctx.spawner().defer(async move {
-            main.spawn(&thread, nargs);
-            drop(r);
-        });
+        {
+            let main = ctx.main();
+            ctx.spawner().defer(async move {
+                main.spawn(&r.to_thread(), nargs);
+
+                drop(r);
+            });
+        }
 
         ctx.ret_with(1)
     }
@@ -77,12 +80,15 @@ pub fn open(main: &luau::Main) {
         let nargs = ctx.get_top() - 2;
         ctx.xmove(&thread, nargs);
 
-        let main = ctx.main();
-        ctx.spawner().spawn(async move {
-            runtime::sleep(delay).await;
-            main.spawn(&thread, nargs);
-            drop(r);
-        });
+        {
+            let main = ctx.main();
+            ctx.spawner().spawn(async move {
+                runtime::sleep(delay).await;
+                main.spawn(&r.to_thread(), nargs);
+
+                drop(r);
+            });
+        }
 
         ctx.pop(1);
         ctx.ret_with(1)
@@ -97,12 +103,15 @@ pub fn open(main: &luau::Main) {
         let r = ctx.to_ref(-1);
         ctx.pop(1);
 
-        let main = ctx.main();
-        ctx.spawner().spawn(async move {
-            runtime::sleep(delay).await;
-            main.spawn(&thread, 0);
-            drop(r);
-        });
+        {
+            let main = ctx.main();
+            ctx.spawner().spawn(async move {
+                runtime::sleep(delay).await;
+                main.spawn(&r.to_thread(), 0);
+
+                drop(r);
+            });
+        }
 
         ctx.yld()
     }
