@@ -101,6 +101,8 @@ pub struct lua_Debug {
     pub ssbuf: [c_char; 256],
 }
 
+pub type lua_Destructor = unsafe extern "C-unwind" fn(L: *mut lua_State, userdata: *mut c_void);
+
 unsafe extern "C-unwind" {
     pub fn lua_newstate(f: lua_Alloc, ud: *mut c_void) -> *mut lua_State;
     pub fn lua_close(L: *mut lua_State);
@@ -179,6 +181,7 @@ unsafe extern "C-unwind" {
     pub fn lua_objlen(L: *mut lua_State, idx: c_int) -> usize;
 
     pub fn lua_newbuffer(L: *mut lua_State, size: usize) -> *mut c_void;
+    pub fn lua_newuserdatatagged(L: *mut lua_State, size: usize, tag: c_int) -> *mut c_void;
 
     pub fn lua_pushcclosurek(
         L: *mut lua_State,
@@ -197,7 +200,11 @@ unsafe extern "C-unwind" {
     pub fn lua_toboolean(L: *mut lua_State, idx: c_int) -> c_int;
     pub fn lua_tolstring(L: *mut lua_State, idx: c_int, len: *mut usize) -> *const c_char;
     pub fn lua_tolightuserdata(L: *mut lua_State, idx: c_int) -> *mut c_void;
-    pub fn lua_touserdata(L: *mut lua_State, idx: c_int) -> *mut c_void;
+    pub fn lua_touserdatatagged(L: *mut lua_State, idx: c_int, tag: c_int) -> *mut c_void;
     pub fn lua_tothread(L: *mut lua_State, idx: c_int) -> *mut lua_State;
     pub fn lua_tobuffer(L: *mut lua_State, idx: c_int, len: *mut usize) -> *mut c_void;
+
+    pub fn lua_userdatatag(L: *mut lua_State, idx: c_int) -> c_int;
+    pub fn lua_setuserdatadtor(L: *mut lua_State, tag: c_int, dtor: lua_Destructor);
+    pub fn lua_setuserdatametatable(L: *mut lua_State, tag: c_int);
 }

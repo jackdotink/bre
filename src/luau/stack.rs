@@ -157,7 +157,6 @@ impl Stack {
             ffi::lua_pushcclosurek(self.as_ptr(), func, name.as_ptr() as _, 0, Some(cont));
         }
     }
-
     pub fn push_bytecode(&self, name: &CStr, bytecode: &Bytecode) {
         unsafe {
             ffi::luau_load(
@@ -167,6 +166,17 @@ impl Stack {
                 bytecode.inner().len() as _,
                 0,
             );
+        }
+    }
+
+    pub fn push_userdata<T: Userdata>(&self, ud: T) {
+        let tag = T::tag();
+
+        unsafe {
+            let ptr = ffi::lua_newuserdatatagged(self.as_ptr(), size_of::<T>(), tag as _);
+            let ptr = ptr as *mut T;
+
+            ptr.write(ud);
         }
     }
 
@@ -244,8 +254,8 @@ impl Stack {
         self.type_of(idx) == Type::Function
     }
 
-    pub fn is_userdata(&self, idx: i32) -> bool {
-        self.type_of(idx) == Type::Userdata
+    pub fn is_userdata<T: Userdata>(&self, idx: i32) -> bool {
+        unsafe { ffi::lua_userdatatag(self.as_ptr(), idx) == (T::tag() as c_int) }
     }
 
     pub fn is_thread(&self, idx: i32) -> bool {
@@ -266,7 +276,7 @@ impl Stack {
 
     pub fn to_light_userdata(&self, idx: i32) -> Option<*mut c_void> {
         if self.is_light_userdata(idx) {
-            Some(unsafe { ffi::lua_touserdata(self.as_ptr(), idx as _) })
+            Some(unsafe { ffi::lua_tolightuserdata(self.as_ptr(), idx as _) })
         } else {
             None
         }
@@ -302,6 +312,14 @@ impl Stack {
 
     pub fn to_string_str(&self, idx: i32) -> Option<&str> {
         std::str::from_utf8(self.to_string_slice(idx)?).ok()
+    }
+
+    pub fn to_userdata<T: Userdata>(&self, idx: i32) -> Option<&mut T> {
+        unsafe {
+            ffi::lua_touserdatatagged(self.as_ptr(), idx, T::tag() as _)
+                .cast::<T>()
+                .as_mut()
+        }
     }
 
     pub fn to_thread(&self, idx: i32) -> Option<Thread> {
@@ -481,6 +499,34 @@ impl Stack {
                 "bad argument #{idx} to function (table or nil expected, got {})",
                 ty
             )),
+        }
+    }
+
+    pub fn arg_userdata<T: Userdata>(&self, idx: u32) -> &mut T {
+        if let Some(ud) = self.to_userdata::<T>(idx as _) {
+            ud
+        } else {
+            self.push_error(format!(
+                "bad argument #{idx} to function ({} expected, got {})",
+                T::name(),
+                self.type_of(idx as _)
+            ))
+        }
+    }
+
+    pub fn arg_userdata_opt<T: Userdata>(&self, idx: u32) -> Option<&mut T> {
+        if let Some(ud) = self.to_userdata::<T>(idx as _) {
+            Some(ud)
+        } else {
+            match self.type_of(idx as _) {
+                Type::None | Type::Nil => None,
+
+                ty => self.push_error(format!(
+                    "bad argument #{idx} to function ({} or nil expected, got {})",
+                    T::name(),
+                    ty
+                )),
+            }
         }
     }
 

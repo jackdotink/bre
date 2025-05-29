@@ -1,8 +1,4 @@
-use std::{
-    ffi::{CStr, CString},
-    path::Path,
-    ptr::NonNull,
-};
+use std::{ffi::CString, path::Path, ptr::NonNull};
 
 pub mod ffi;
 
@@ -11,12 +7,14 @@ mod extra;
 mod main;
 mod stack;
 mod thread;
+mod userdata;
 
 pub use compiler::{Bytecode, Compiler};
 pub use extra::*;
 pub use main::Main;
 pub use stack::Stack;
 pub use thread::Thread;
+pub use userdata::*;
 
 pub const REGISTRY_IDX: i32 = ffi::LUA_REGISTRYINDEX;
 
