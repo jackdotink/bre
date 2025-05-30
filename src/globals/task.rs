@@ -1,8 +1,11 @@
 use std::time::Duration;
 
-use crate::{luau, runtime};
+use crate::{library, luau, runtime};
 
-pub fn open(main: &luau::Main) {
+pub struct Task;
+library!(Task, spawn, defer, delay, wait);
+
+impl Task {
     extern "C-unwind" fn spawn(ctx: luau::Context) -> luau::FnReturn {
         let thread = match ctx.type_of(1) {
             luau::Type::Thread => ctx.to_thread(1).unwrap(),
@@ -83,7 +86,7 @@ pub fn open(main: &luau::Main) {
         {
             let main = ctx.main();
             ctx.spawner().spawn(async move {
-                runtime::sleep(delay).await;
+                runtime::time::sleep(delay).await;
                 main.spawn(&r.to_thread(), nargs);
 
                 drop(r);
@@ -106,7 +109,7 @@ pub fn open(main: &luau::Main) {
         {
             let main = ctx.main();
             ctx.spawner().spawn(async move {
-                runtime::sleep(delay).await;
+                runtime::time::sleep(delay).await;
                 main.spawn(&r.to_thread(), 0);
 
                 drop(r);
@@ -115,19 +118,4 @@ pub fn open(main: &luau::Main) {
 
         ctx.yld()
     }
-
-    let stack = main.stack();
-    stack.push_table();
-
-    stack.push_function(c"task.spawn", spawn);
-    stack.table_set_field(-2, c"spawn");
-
-    stack.push_function(c"task.defer", defer);
-    stack.table_set_field(-2, c"defer");
-
-    stack.push_function(c"task.delay", delay);
-    stack.table_set_field(-2, c"delay");
-
-    stack.push_function(c"task.wait", wait);
-    stack.table_set_field(-2, c"wait");
 }

@@ -4,6 +4,7 @@ pub mod ffi;
 
 mod compiler;
 mod extra;
+mod library;
 mod main;
 mod stack;
 mod thread;
@@ -11,6 +12,7 @@ mod userdata;
 
 pub use compiler::{Bytecode, Compiler};
 pub use extra::*;
+pub use library::*;
 pub use main::Main;
 pub use stack::Stack;
 pub use thread::Thread;
@@ -68,7 +70,7 @@ impl<'executor> Luau<'executor> {
 
             crate::globals::require::open(&Main(state));
 
-            crate::globals::task::open(&Main(state));
+            crate::globals::task::Task::push(Stack(state));
             ffi::lua_setfield(state.as_ptr(), ffi::LUA_GLOBALSINDEX, c"task".as_ptr());
 
             ffi::luaL_sandbox(state.as_ptr());
