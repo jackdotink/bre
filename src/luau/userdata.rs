@@ -41,6 +41,14 @@ macro_rules! userdata {
 
 				stack.push_table();
 				$(
+					let debugname = const {
+						let bytes = concat!(stringify!($udtype), "::", stringify!($method), "\0").as_bytes();
+						match ::std::ffi::CStr::from_bytes_with_nul(bytes) {
+							Ok(cstr) => cstr,
+							Err(_) => unreachable!(),
+						}
+					};
+
 					let methodname = const {
 						let bytes = concat!(stringify!($method), "\0").as_bytes();
 						match ::std::ffi::CStr::from_bytes_with_nul(bytes) {
@@ -49,7 +57,7 @@ macro_rules! userdata {
 						}
 					};
 
-					stack.push_function(methodname, Self::$method);
+					stack.push_function(debugname, Self::$method);
 					stack.table_set_raw_field(-2, methodname);
 				),*
 				stack.table_set_raw_field(-2, c"__index");
