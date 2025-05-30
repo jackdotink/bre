@@ -9,10 +9,9 @@ use crossbeam::channel::{self, Receiver, Sender};
 
 mod reactor;
 
-mod time;
-mod util;
-
-pub use time::*;
+pub mod fs;
+pub mod time;
+pub mod util;
 
 pub struct Executor {
     queue: Receiver<Arc<Task>>,
