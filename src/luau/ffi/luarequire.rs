@@ -115,4 +115,6 @@ unsafe extern "C-unwind" {
         config_init: luarequire_configuration_init,
         ctx: *mut c_void,
     );
+
+    pub fn luarequire_registermodule(L: *mut lua_State) -> c_int;
 }

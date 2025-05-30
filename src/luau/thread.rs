@@ -48,4 +48,12 @@ impl Thread {
     pub fn coro_status(&self) -> CoroStatus {
         unsafe { CoroStatus::from(ffi::lua_costatus(self.as_ptr())) }
     }
+
+    pub fn to_ref(&self) -> Ref {
+        let stack = self.stack();
+        stack.push_thread(self);
+        let r = stack.to_ref(-1);
+        stack.pop(1);
+        r
+    }
 }

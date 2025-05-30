@@ -410,7 +410,7 @@ extern "C-unwind" fn load(
     }
 }
 
-pub fn open(main: &luau::Main) {
+pub fn open(main: luau::Main) {
     #[allow(clippy::missing_transmute_annotations)]
     extern "C-unwind" fn luarequire_configuration_init(
         config: *mut luau::ffi::luarequire_Configuration,
